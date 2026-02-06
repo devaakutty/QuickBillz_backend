@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id       String @id @default(uuid())
+  email    String @unique
+  password String
+
+  firstName String?
+  lastName  String?
+  phone     String?
+  company   String?
+  website   String?
+  gstNumber String?
+  address   String?
+  country   String?
+  state     String?
+  city      String?
+  zip       String?
+
+  customers Customer[]
+  invoices  Invoice[]
+
+  createdAt DateTime  @default(now())
+  Product   Product[]
+}
+
+model Customer {
+  id        String    @id @default(uuid())
+  name      String
+  phone     String?   @unique
+  email     String?
+  address   String?
+  isActive  Boolean   @default(true)
+  isDeleted Boolean   @default(false)
+  userId    String
+  createdAt DateTime  @default(now())
+  User      User      @relation(fields: [userId], references: [id])
+  Invoice   Invoice[]
+}
+
+model Invoice {
+  id        String @id @default(uuid())
+  invoiceNo String
+  total     Float
+  status    String @default("PAID")
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  items   InvoiceItem[]
+  payment Payment?
+
+  createdAt DateTime @default(now())
+}
+
+model Payment {
+  id       String   @id @default(uuid())
+  method   String
+  provider String?
+  amount   Float
+  paidAt   DateTime @default(now())
+
+  invoiceId String  @unique
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+}
+
+model InvoiceItem {
+  id          String   @id @default(uuid())
+  invoiceId   String
+  productId   Int?
+  productName String
+  quantity    Int
+  rate        Float
+  amount      Float
+  createdAt   DateTime @default(now())
+  invoice     Invoice  @relation(fields: [invoiceId], references: [id])
+  product     Product? @relation(fields: [productId], references: [id])
+}
+
+model Product {
+  id        Int      @id @default(autoincrement())
+  name      String
+  rate      Float              // price per unit
+  unit      String?             // pcs / kg / liter
+  stock     Int      @default(0) // 🔥 quantity available
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+
+  userId String
+  user   User   @relation(fields: [userId], references: [id])
+
+  invoiceItems InvoiceItem[]
+}
+
+
+enum InvoiceStatus {
+  PAID
+  PENDING
+}
