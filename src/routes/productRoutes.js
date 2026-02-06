@@ -6,6 +6,7 @@ import {
   getProductById,
   updateProduct,
   deleteProduct,
+  bulkCreateProducts
 } from "../controllers/productController.js";
 
 const router = express.Router();
@@ -15,5 +16,6 @@ router.get("/", authMiddleware, getProducts);
 router.get("/:id", authMiddleware, getProductById);
 router.put("/:id", authMiddleware, updateProduct);
 router.delete("/:id", authMiddleware, deleteProduct);
+router.post("/bulk", authMiddleware, bulkCreateProducts);
 
 export default router;

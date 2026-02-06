@@ -288,85 +288,121 @@ export const markInvoiceAsPaid = async (req, res) => {
 
 
 /// DOWNLOAD INVOICE AS PDF
-
 export const downloadInvoicePdf = async (req, res) => {
   try {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: req.params.id },
+    /* ================= AUTH & FETCH ================= */
+    if (!req.user?.id) return res.status(401).json({ message: "Unauthorized" });
+
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
       include: { customer: true, items: true },
     });
+    if (!invoice) return res.status(404).json({ message: "Invoice not found" });
 
-    if (!invoice) {
-      return res.status(404).json({ message: "Invoice not found" });
-    }
+    const subTotal = invoice.items.reduce((sum, item) => sum + item.amount, 0);
+    const gstAmount = subTotal * 0.18;
+    const grandTotal = subTotal + gstAmount;
 
-    // ===== CALCULATIONS =====
-    const subTotal = invoice.items.reduce((s, i) => s + i.amount, 0);
-    const tax = subTotal * 0.05;
-    const gst = subTotal * 0.18;
-    const total = subTotal + tax + gst;
+    /* ================= 1. THE HEIGHT CALCULATION ================= */
+    // We add up all sections to define the exact paper length
+    const headerH = 150; 
+    const itemH = invoice.items.length * 25; // Space per product row
+    const footerH = 140;
+    const totalHeight = headerH + itemH + footerH;
 
-    // ===== THERMAL SIZE (80mm) =====
     const doc = new PDFDocument({
-      size: [226, 650],
-      margin: 10,
+      size: [226, totalHeight], // 80mm width, custom length
+      margins: { top: 0, bottom: 0, left: 10, right: 10 },
+      autoFirstPage: false // We will add the page manually to control it
+    });
+
+    // CRITICAL: Manually add one page with NO layout breaks
+    doc.addPage({
+      size: [226, totalHeight],
+      margins: { top: 0, bottom: 0, left: 10, right: 10 }
     });
 
     res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `inline; filename=invoice-${invoice.invoiceNo}.pdf`
-    );
-
+    res.setHeader("Content-Disposition", `inline; filename=invoice-${invoice.invoiceNo}.pdf`);
     doc.pipe(res);
 
-    // ===== MONOSPACE FONT (VERY IMPORTANT) =====
-    doc.font("Courier").fontSize(9);
+    /* ================= 2. BRANDED HEADER ================= */
+    doc.rect(0, 0, 226, 60).fill("#1a1a1a"); 
+    doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(16).text("QuickBillz", 0, 18, { align: "center" });
+    doc.fontSize(7).font("Helvetica").text("PREMIUM POS INVOICE", 0, 38, { align: "center", characterSpacing: 1.5 });
 
-    const line = "--------------------------------";
+    /* ================= 3. SHOP & CUSTOMER INFO ================= */
+    doc.fillColor("#000000").moveDown(3);
+    doc.fontSize(8).font("Helvetica-Bold").text("INVOICEHUB STORE", { align: "center" });
+    doc.font("Helvetica").fontSize(7).text("Chennai, TN | GST: 33AAAAA0000A1Z5", { align: "center" });
+    
+    doc.moveDown(1);
+    const infoY = doc.y;
+    doc.fontSize(7).font("Helvetica-Bold").text(`INV: #${invoice.invoiceNo}`, 10, infoY);
+    doc.text(`DATE: ${new Date(invoice.createdAt).toLocaleDateString()}`, 130, infoY, { align: "right" });
+    doc.moveDown(0.2);
+    doc.font("Helvetica").text(`CUSTOMER: ${invoice.customer.name.toUpperCase()}`, 10);
+    
+    doc.moveDown(0.8);
+    doc.moveTo(10, doc.y).lineTo(216, doc.y).lineWidth(0.5).stroke();
 
-    // ===== HEADER =====
-    doc.text("YOUR SHOP NAME", { align: "center" });
-    doc.text("Chennai, Tamil Nadu", { align: "center" });
-    doc.text("Ph: 9876543210", { align: "center" });
-    doc.text(line);
+    /* ================= 4. COMPACT TABLE ================= */
+    doc.moveDown(0.5);
+    const tableTop = doc.y;
+    doc.font("Helvetica-Bold").fontSize(7);
+    doc.text("ITEM", 10, tableTop);
+    doc.text("RATE", 100, tableTop, { width: 35, align: "right" });
+    doc.text("QTY", 140, tableTop, { width: 25, align: "right" });
+    doc.text("TOTAL", 175, tableTop, { width: 40, align: "right" });
+    
+    doc.moveDown(0.4);
+    doc.moveTo(10, doc.y).lineTo(216, doc.y).lineWidth(0.2).stroke();
+    doc.moveDown(0.6);
 
-    // ===== INVOICE INFO =====
-    doc.text(`Invoice: ${invoice.invoiceNo}`);
-    doc.text(`Date: ${new Date(invoice.createdAt).toDateString()}`);
-    doc.text(`Customer: ${invoice.customer.name}`);
-    doc.text(`Phone: ${invoice.customer.phone ?? "-"}`);
-    doc.text(line);
-
-    // ===== TABLE HEADER =====
-    doc.text("ITEM        QTY      AMT");
-
-    // ===== ITEMS =====
+    /* ================= 5. ITEMS LOOP ================= */
     invoice.items.forEach((item) => {
-      const name = item.productName.padEnd(12, " ");
-      const qty = String(item.quantity).padEnd(5, " ");
-      const amt = item.amount.toFixed(2).padStart(7, " ");
+      const y = doc.y;
+      const rate = (item.amount / item.quantity).toFixed(2);
 
-      doc.text(`${name}${qty}${amt}`);
+      doc.font("Helvetica-Bold").text(item.productName.toUpperCase(), 10, y, { width: 85 });
+      doc.font("Helvetica");
+      doc.text(rate, 100, y, { width: 35, align: "right" });
+      doc.text(item.quantity.toString(), 140, y, { width: 25, align: "right" });
+      doc.font("Helvetica-Bold").text(item.amount.toFixed(2), 175, y, { width: 40, align: "right" });
+      
+      doc.moveDown(1.2); 
     });
 
-    doc.text(line);
+    /* ================= 6. SUMMARY BOX ================= */
+    doc.moveDown(0.5);
+    doc.moveTo(10, doc.y).lineTo(216, doc.y).lineWidth(0.5).stroke();
+    doc.moveDown(0.8);
 
-    // ===== TOTALS =====
-    doc.text(`Sub Total          ₹${subTotal.toFixed(2)}`);
-    doc.text(`Tax (5%)           ₹${tax.toFixed(2)}`);
-    doc.text(`GST (18%)          ₹${gst.toFixed(2)}`);
-    doc.text(line);
-    doc.text(`TOTAL              ₹${total.toFixed(2)}`);
-    doc.text(line);
+    const summaryY = doc.y;
+    doc.font("Helvetica").fontSize(7);
+    doc.text("SUBTOTAL", 110, summaryY);
+    doc.text(`₹${subTotal.toFixed(2)}`, 175, summaryY, { align: "right" });
 
-    // ===== FOOTER =====
-    doc.text("Thank you for shopping!", { align: "center" });
-    doc.text("Visit Again 😊", { align: "center" });
+    doc.text("GST (18%)", 110, summaryY + 12);
+    doc.text(`₹${gstAmount.toFixed(2)}`, 175, summaryY + 12, { align: "right" });
+
+    // Bold Total Bar
+    doc.rect(105, summaryY + 25, 111, 20).fill("#1a1a1a");
+    doc.fillColor("#FFFFFF").font("Helvetica-Bold").fontSize(9);
+    doc.text("GRAND TOTAL", 112, summaryY + 31);
+    doc.text(`₹${grandTotal.toFixed(2)}`, 160, summaryY + 31, { width: 55, align: "right" });
+
+    /* ================= 7. FOOTER ================= */
+    // doc.fillColor("#000000").moveDown(5);
+    // doc.font("Helvetica-Oblique").fontSize(8).text("Thank you for choosing QuickBillz!", { align: "center" });
+    
+    // doc.moveDown(1.5);
+    // doc.font("Helvetica").fontSize(7).text("- - - - - - - - - - - - - - - - - - - - - - - - - -", { align: "center" });
+    // doc.text("✂ Cut Here", { align: "center" });
 
     doc.end();
   } catch (err) {
-    console.error("PDF Error:", err);
-    res.status(500).json({ message: err.message });
+    console.error("❌ PDF Error:", err);
+    res.status(500).json({ message: "Internal Server Error" });
   }
 };

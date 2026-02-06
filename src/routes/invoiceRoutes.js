@@ -4,6 +4,7 @@ import {
   getInvoiceById,
   updateInvoice,
   deleteInvoice,
+  // downloadInvoicePdf,.
   downloadInvoicePdf,
   markInvoiceAsPaid,
   createInvoice,
@@ -22,6 +23,7 @@ router.get("/:id", getInvoiceById);
 router.put("/:id", updateInvoice);
 router.put("/:id/pay", markInvoiceAsPaid);
 router.delete("/:id", deleteInvoice);
+// router.get("/:id/pdf", downloadInvoicePdf);
 router.get("/:id/pdf", downloadInvoicePdf);
 
 export default router;

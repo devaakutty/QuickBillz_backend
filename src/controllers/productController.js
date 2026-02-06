@@ -148,3 +148,42 @@ export const deleteProduct = async (req, res) => {
     res.status(500).json({ message: error.message });
   }
 };
+
+/// ================= BULK CREATE PRODUCTS =================
+export const bulkCreateProducts = async (req, res) => {
+  try {
+    if (!req.user?.id) {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { products } = req.body;
+
+    if (!Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ message: "Products required" });
+    }
+
+    const formattedProducts = products.map((p, index) => {
+      if (!p.name || typeof p.stock !== "number" || typeof p.price !== "number") {
+        throw new Error(`Invalid product data at row ${index + 1}`);
+      }
+
+      return {
+        name: p.name.trim(),
+        rate: p.price,          // ✅ FIXED
+        stock: p.stock,
+        isActive: true,
+        userId: req.user.id,    // ✅ REQUIRED
+      };
+    });
+
+    await prisma.product.createMany({
+      data: formattedProducts,
+      skipDuplicates: true,
+    });
+
+    res.json({ message: "Products added successfully" });
+  } catch (error) {
+    console.error("Bulk insert error:", error);
+    res.status(500).json({ message: "Bulk insert failed" });
+  }
+};
